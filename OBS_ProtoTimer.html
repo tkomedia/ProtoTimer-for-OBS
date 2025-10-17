@@ -330,6 +330,13 @@
                             // This is the line that sometimes fails due to security restrictions on local files
                             const authResponse = await getAuthResponse(auth.salt, auth.challenge, password);
                             
+                            // --- DEBUGGING OUTPUT ---
+                            console.log("OBS Auth Salt:", auth.salt);
+                            console.log("OBS Auth Challenge:", auth.challenge);
+                            console.log("OBS Password entered:", password);
+                            console.log("Calculated Auth Response:", authResponse);
+                            // --- END DEBUGGING OUTPUT ---
+
                             const identifyPayload = {
                                 op: 1, // Op code for Identify
                                 d: {
