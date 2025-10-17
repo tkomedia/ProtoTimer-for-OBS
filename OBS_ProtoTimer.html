@@ -92,7 +92,8 @@
 
     <script>
         // Constants for WebSocket
-        const OBS_WEBSOCKET_URL = 'ws://127.0.0.1:4455';
+        // CRITICAL FIX: Changed from 127.0.0.1 (localhost) to the LAN IP reported by the user's OBS.
+        const OBS_WEBSOCKET_URL = 'ws://10.23.110.54:4455'; 
         
         // DOM Elements
         const timerValueEl = document.getElementById('timer-value');
@@ -331,6 +332,7 @@
                             const authResponse = await getAuthResponse(auth.salt, auth.challenge, password);
                             
                             // --- DEBUGGING OUTPUT ---
+                            // These lines can be removed once connection is successful
                             console.log("OBS Auth Salt:", auth.salt);
                             console.log("OBS Auth Challenge:", auth.challenge);
                             console.log("OBS Password entered:", password);
