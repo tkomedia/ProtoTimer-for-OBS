@@ -79,21 +79,40 @@
 
         <!-- Connection and Password -->
         <div class="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4 pt-4 border-t border-gray-700">
-            <label class="block flex-grow">
+            
+            <label class="block w-full md:w-1/3">
+                <span class="text-sm font-medium text-gray-400">OBS Hostname/IP</span>
+                <!-- DEFAULT TO LOCALHOST -->
+                <input type="text" id="ip-input" value="127.0.0.1" class="mt-1 w-full p-2 border border-gray-600 bg-gray-700 rounded-lg text-lg focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="127.0.0.1 or 192.168.x.x">
+            </label>
+            
+            <label class="block w-full md:w-1/3">
                 <span class="text-sm font-medium text-gray-400">OBS-WebSocket Password (Leave blank if none)</span>
                 <input type="password" id="password-input" class="mt-1 w-full p-2 border border-gray-600 bg-gray-700 rounded-lg text-lg focus:ring-indigo-500 focus:border-indigo-500 transition">
             </label>
 
-            <button id="connect-button" class="mt-4 md:mt-0 w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl transition duration-200 shadow-md hover:shadow-lg disabled:opacity-50" onclick="connectToObs()">
+            <button id="connect-button" class="mt-4 md:mt-0 w-full md:w-1/3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl transition duration-200 shadow-md hover:shadow-lg disabled:opacity-50" onclick="connectToObs()">
                 Connect to OBS
+            </button>
+        </div>
+
+        <!-- Manual Control Buttons -->
+        <div class="flex space-x-4 pt-4 border-t border-gray-700">
+            <button id="manual-start" class="w-1/3 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-xl transition duration-200 shadow-md hover:shadow-lg" onclick="startTimer()">
+                Start Timer
+            </button>
+            <button id="manual-stop" class="w-1/3 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl transition duration-200 shadow-md hover:shadow-lg" onclick="stopTimer()">
+                Stop Timer
+            </button>
+            <button id="manual-reset" class="w-1/3 bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-xl transition duration-200 shadow-md hover:shadow-lg" onclick="resetTimer()">
+                Reset Rundown
             </button>
         </div>
     </div>
 
     <script>
-        // Constants for WebSocket
-        // CRITICAL FIX: Changed from 127.0.0.1 (localhost) to the LAN IP reported by the user's OBS.
-        const OBS_WEBSOCKET_URL = 'ws://10.23.110.54:4455'; 
+        // Constants for WebSocket - now dynamically built from inputs
+        const OBS_WEBSOCKET_PORT = 4455; 
         
         // DOM Elements
         const timerValueEl = document.getElementById('timer-value');
@@ -101,6 +120,7 @@
         const totalRuntimeEl = document.getElementById('total-runtime');
         const statusMessageEl = document.getElementById('status-message');
         const passwordInputEl = document.getElementById('password-input');
+        const ipInputEl = document.getElementById('ip-input');
 
         // State Variables
         let ws = null;
@@ -178,7 +198,7 @@
             // Conditional Coloring
             if (remainingTimeMs <= 60000 && remainingTimeMs > 0) { // Below 1 minute (60,000 ms)
                 timerValueEl.classList.add('text-red-500');
-                timerValueEl.classList.remove('text-white');
+                timerValueEl.classList.remove('text-white', 'text-gray-500');
             } else if (remainingTimeMs === 0 && !isRunning) {
                 timerValueEl.classList.add('text-gray-500'); // Faded grey when finished
                 timerValueEl.classList.remove('text-white', 'text-red-500');
@@ -188,7 +208,7 @@
             }
         }
 
-        // --- Timer Control Logic ---
+        // --- Timer Control Logic (Used for Manual Buttons or OBS Start) ---
 
         function startTimer() {
             if (isRunning) return;
@@ -257,7 +277,7 @@
                         const parts = value.split(':');
                         const minutes = parseInt(parts[0]) || 0;
                         const seconds = parseInt(parts[1]) || 0;
-                        // Ensure seconds don't exceed 59 for a clean calculation
+                        // Cap seconds at 59 for a clean calculation
                         const effectiveSeconds = Math.min(seconds, 59); 
                         durationMs = (minutes * 60 + effectiveSeconds) * 1000;
 
@@ -284,7 +304,10 @@
             }
 
             updateDisplay();
-            updateStatus(`Rundown prepared: ${timerRundown.length} timers ready.`, 'text-indigo-400');
+            // Only show the preparation status if not currently connected/authenticated
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                updateStatus(`Rundown prepared: ${timerRundown.length} timers ready.`, 'text-indigo-400');
+            }
         }
 
         // --- OBS WebSocket Handlers ---
@@ -298,15 +321,20 @@
                 ws.close();
             }
             
-            // First, run a reset to read the latest durations before connecting
+            // 1. Read input and determine protocol
             resetTimer(); 
-            
             const password = passwordInputEl.value;
+            const hostname = ipInputEl.value || '127.0.0.1';
+            
+            // Use 'wss://' if the page itself is secure (HTTPS), otherwise use 'ws://'
+            // This attempts to fix the Mixed Content Error when hosting on GitHub Pages
+            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            
+            const websocketUrl = `${protocol}://${hostname}:${OBS_WEBSOCKET_PORT}`;
 
-            // Important: Set this flag before opening the connection if a password is provided
             isAwaitingAuthentication = !!password; 
 
-            ws = new WebSocket(OBS_WEBSOCKET_URL);
+            ws = new WebSocket(websocketUrl);
 
             ws.onopen = () => {
                 updateStatus('Connected to OBS. Awaiting Handshake...', 'text-yellow-400');
@@ -322,28 +350,19 @@
                     if (auth) {
                         // Authentication is required
                         if (!password) {
-                            updateStatus('ERROR: Authentication required but password not entered.', 'text-red-500');
+                            updateStatus('ERROR: Authentication required but password not entered. Closing connection.', 'text-red-500');
                             ws.close();
                             return;
                         }
                         
                         try {
-                            // This is the line that sometimes fails due to security restrictions on local files
                             const authResponse = await getAuthResponse(auth.salt, auth.challenge, password);
                             
-                            // --- DEBUGGING OUTPUT ---
-                            // These lines can be removed once connection is successful
-                            console.log("OBS Auth Salt:", auth.salt);
-                            console.log("OBS Auth Challenge:", auth.challenge);
-                            console.log("OBS Password entered:", password);
-                            console.log("Calculated Auth Response:", authResponse);
-                            // --- END DEBUGGING OUTPUT ---
-
                             const identifyPayload = {
                                 op: 1, // Op code for Identify
                                 d: {
                                     rpcVersion: 1,
-                                    authentication: authResponse, // Send calculated response
+                                    authentication: authResponse, 
                                     eventSubscriptions: 1 << 6 // Subscribe to RecordStateChanged event
                                 }
                             };
@@ -372,12 +391,7 @@
                 // Op Code 2: Identified (Authentication successful)
                 if (data.op === 2) {
                     isAwaitingAuthentication = false;
-                    updateStatus('Authenticated successfully. Ready! Start recording to begin.', 'text-green-500');
-                }
-
-                // Op Code 3: Re-Identify (Used on connection disruption/resumption, though rare here)
-                if (data.op === 3) {
-                    // We don't need to do anything special here since we are subscribing on Identify
+                    updateStatus('Authenticated successfully. Ready! Timer is linked to OBS Recording.', 'text-green-500');
                 }
 
                 // Op Code 5: Event
@@ -398,17 +412,14 @@
             };
 
             ws.onerror = (error) => {
-                updateStatus('Connection Error. Check console/port.', 'text-red-500');
+                updateStatus(`Connection Error. Could not connect to ${websocketUrl}. Check IP/Port/Protocol.`, 'text-red-500');
                 console.error("WebSocket Error:", error);
             };
 
             ws.onclose = () => {
                 if (isAwaitingAuthentication) {
-                    // This specific message is only shown if we know we tried to authenticate 
-                    // and the connection closed immediately after.
-                    updateStatus('Authentication Failed. Check password (use simple characters!) and OBS settings.', 'text-red-500');
+                    updateStatus('Authentication Failed. Check password and OBS settings. Closing connection.', 'text-red-500');
                 } else {
-                    // Generic disconnection message
                     updateStatus('Disconnected from OBS.', 'text-red-500');
                 }
                 stopTimer();
