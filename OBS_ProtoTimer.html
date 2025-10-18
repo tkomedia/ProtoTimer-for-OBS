@@ -86,10 +86,17 @@
                 <input type="text" id="ip-input" value="127.0.0.1" class="mt-1 w-full p-2 border border-gray-600 bg-gray-700 rounded-lg text-lg focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="127.0.0.1 or 192.168.x.x">
             </label>
             
-            <label class="block w-full md:w-1/3">
-                <span class="text-sm font-medium text-gray-400">OBS-WebSocket Password (Leave blank if none)</span>
-                <input type="password" id="password-input" class="mt-1 w-full p-2 border border-gray-600 bg-gray-700 rounded-lg text-lg focus:ring-indigo-500 focus:border-indigo-500 transition">
-            </label>
+            <div class="flex flex-col w-full md:w-1/3">
+                <label class="block mb-2">
+                    <span class="text-sm font-medium text-gray-400">OBS-WebSocket Password (Leave blank if none)</span>
+                    <input type="password" id="password-input" class="mt-1 w-full p-2 border border-gray-600 bg-gray-700 rounded-lg text-lg focus:ring-indigo-500 focus:border-indigo-500 transition">
+                </label>
+                <!-- NEW CHECKBOX TO FORCE UNSECURED PROTOCOL -->
+                <label class="inline-flex items-center text-sm text-gray-400">
+                    <input type="checkbox" id="force-ws-checkbox" class="form-checkbox text-indigo-500 bg-gray-700 border-gray-600 rounded" checked>
+                    <span class="ml-2">Force Unsecured WS (Required for most OBS setups)</span>
+                </label>
+            </div>
 
             <button id="connect-button" class="mt-4 md:mt-0 w-full md:w-1/3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl transition duration-200 shadow-md hover:shadow-lg disabled:opacity-50" onclick="connectToObs()">
                 Connect to OBS
@@ -325,11 +332,17 @@
             resetTimer(); 
             const password = passwordInputEl.value;
             const hostname = ipInputEl.value || '127.0.0.1';
+            const forceWs = document.getElementById('force-ws-checkbox').checked; // Read new checkbox
             
-            // Use 'wss://' if the page itself is secure (HTTPS), otherwise use 'ws://'
-            // This attempts to fix the Mixed Content Error when hosting on GitHub Pages
-            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            
+            // Determine protocol: Use 'ws' if forced, otherwise use 'wss' for HTTPS pages
+            let protocol = 'ws';
+            if (!forceWs && window.location.protocol === 'https:') {
+                protocol = 'wss';
+                updateStatus('Attempting secure WSS connection (may fail if OBS is not configured for TLS).', 'text-yellow-400');
+            } else if (forceWs) {
+                 updateStatus('Forcing unsecured WS connection to resolve HTTPS conflict.', 'text-orange-400');
+            }
+
             const websocketUrl = `${protocol}://${hostname}:${OBS_WEBSOCKET_PORT}`;
 
             isAwaitingAuthentication = !!password; 
@@ -417,8 +430,11 @@
             };
 
             ws.onclose = () => {
-                if (isAwaitingAuthentication) {
-                    updateStatus('Authentication Failed. Check password and OBS settings. Closing connection.', 'text-red-500');
+                // If we were waiting for an authentication response (meaning password was provided), and the connection closed, 
+                // it implies auth failure (either password hash rejected or TLS/WSS needed).
+                // If it closes without a password, it's a generic connection/firewall issue.
+                if (isAwaitingAuthentication && ws.readyState === WebSocket.CLOSED) {
+                    updateStatus('Authentication Failed. Check password, and ensure "Force Unsecured WS" is checked.', 'text-red-500');
                 } else {
                     updateStatus('Disconnected from OBS.', 'text-red-500');
                 }
